@@ -36,7 +36,7 @@ You’ll get output like:
 
 1. Create a config class with:
    ```java
-   @Configuration
+    @Configuration
     @DevTourScan(value = "cl.prezdev")
     public class DevTourConfig {
         @PostConstruct
