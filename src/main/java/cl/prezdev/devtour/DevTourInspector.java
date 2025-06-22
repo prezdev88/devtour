@@ -1,7 +1,6 @@
 package cl.prezdev.devtour;
 
 import java.lang.reflect.Method;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -16,7 +15,8 @@ public class DevTourInspector {
 
     private static final Logger logger = Logger.getLogger(DevTourInspector.class.getName());
 
-    private DevTourInspector() {}
+    private DevTourInspector() {
+    }
 
     public static void analyzeAndPrint() {
         String basePackage = tryFindPackageFromAnnotation();
@@ -34,25 +34,44 @@ public class DevTourInspector {
         if (logger.isLoggable(Level.INFO)) {
             logger.info(String.format("🔍 Analyzing package: %s", basePackage));
         }
-        
-        Map<Integer, String> flowMap = new TreeMap<>();
+
+        Map<Integer, DevTourEntry> entries = new TreeMap<>();
 
         Reflections reflections = new Reflections(new ConfigurationBuilder()
                 .forPackage(basePackage)
                 .addScanners(Scanners.TypesAnnotated, Scanners.MethodsAnnotated));
 
-        for (Class<?> clazz : reflections.getTypesAnnotatedWith(DevTour.class)) {
-            DevTour annotation = clazz.getAnnotation(DevTour.class);
-            flowMap.put(annotation.order(), formatEntry(clazz.getSimpleName(), false, annotation.description()));
-        }
+        addClassLevelEntries(reflections, entries);
+        addMethodLevelEntries(reflections, entries);
 
+        return entries.values().stream()
+                .map(DevTourEntry::format)
+                .toList();
+    }
+
+    private static void addClassLevelEntries(Reflections reflections, Map<Integer, DevTourEntry> entries) {
+        for (Class<?> annotatedClass : reflections.getTypesAnnotatedWith(DevTour.class)) {
+            DevTour annotation = annotatedClass.getAnnotation(DevTour.class);
+            DevTourEntry entry = new DevTourEntry(
+                    annotation.order(),
+                    annotatedClass.getSimpleName(),
+                    annotation.description(),
+                    false);
+            entries.put(entry.getOrder(), entry);
+        }
+    }
+
+    private static void addMethodLevelEntries(Reflections reflections, Map<Integer, DevTourEntry> entries) {
         for (Method method : reflections.getMethodsAnnotatedWith(DevTour.class)) {
             DevTour annotation = method.getAnnotation(DevTour.class);
-            String fullName = method.getDeclaringClass().getSimpleName() + "." + method.getName() + "()";
-            flowMap.put(annotation.order(), formatEntry(fullName, true, annotation.description()));
+            String methodFullName = method.getDeclaringClass().getSimpleName() + "." + method.getName() + "()";
+            DevTourEntry entry = new DevTourEntry(
+                    annotation.order(),
+                    methodFullName,
+                    annotation.description(),
+                    true);
+            entries.put(entry.getOrder(), entry);
         }
-
-        return new ArrayList<>(flowMap.values());
     }
 
     private static String tryFindPackageFromAnnotation() {
@@ -62,17 +81,24 @@ public class DevTourInspector {
 
         return reflections.getTypesAnnotatedWith(DevTourScan.class).stream()
                 .findFirst()
-                .map(cls -> cls.getAnnotation(DevTourScan.class).value())
+                .map(annotatedClass -> annotatedClass.getAnnotation(DevTourScan.class).value())
                 .orElse(null);
     }
 
-    private static String formatEntry(String name, boolean isMethod, String description) {
-        String icon = isMethod ? "🔧 " : "🧱 ";
-        return icon + name + (description.isBlank() ? "" : "  // " + description);
+    private static void printBanner() {
+        String version = readVersionFromManifest();
+        if (logger.isLoggable(Level.INFO)) {
+            logger.info(String.format("======= 🧭 DEV TOUR v%s: YOUR GUIDED RIDE THROUGH THE CODEBASE =======", version));
+        }
     }
 
-    private static void printBanner() {
-        logger.info("======= 🧭 DEV TOUR: YOUR GUIDED RIDE THROUGH THE CODEBASE =======");
+    private static String readVersionFromManifest() {
+        try {
+            Package pkg = DevTourInspector.class.getPackage();
+            return pkg != null ? pkg.getImplementationVersion() : "unknown";
+        } catch (Exception e) {
+            return "unknown";
+        }
     }
 
     private static void printFooter() {
