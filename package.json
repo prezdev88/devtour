@@ -16,7 +16,27 @@
     {
       "command": "devtour.start",
       "title": "Devtour: Start DevTour"
-    }]
+    },
+    {
+      "command": "devtour.addStep",
+      "title": "Devtour: Add DevTour Step"
+    }],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "devtour.addStep",
+          "when": "editorTextFocus",
+          "group": "navigation"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "devtour.addStep",
+        "key": "ctrl+d ctrl+a",
+        "when": "editorTextFocus"
+      }
+    ]
   },
   "scripts": {
     "lint": "eslint .",
