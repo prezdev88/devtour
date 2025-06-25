@@ -12,9 +12,10 @@
   "activationEvents": [],
   "main": "./extension.js",
   "contributes": {
-    "commands": [{
-      "command": "devtour.helloWorld",
-      "title": "Hello World"
+    "commands": [
+    {
+      "command": "devtour.start",
+      "title": "Devtour: Start DevTour"
     }]
   },
   "scripts": {
