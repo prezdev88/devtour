@@ -1,65 +1,57 @@
-# devtour README
+# DevTour
 
-This is the README for your extension "devtour". After writing up a brief description, we recommend including the following sections.
+DevTour is a Visual Studio Code extension that helps you document and explore a project's logical flow without leaving the editor. Each step is stored in `.devtour/devtour.json`, and you can browse them from a dedicated sidebar view.
 
-## Features
+## Key features
+- **DevTour Explorer panel**: Displays every recorded step in order, showing the file name, related line, and the optional description you add.
+- **Quick access to the configuration file**: Open the DevTour JSON with a single click to edit it manually if needed.
+- **Jump straight to the code**: Selecting a step focuses the corresponding file and line in the editor.
+- **Keyboard shortcut**: Capture the current context without reaching for the mouse.
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+## How to use
+1. Open the project you want to document.
+2. Place the cursor on a relevant line and run **DevTour: Add DevTour Step** (context menu or `Ctrl+D Ctrl+A`).
+3. (Optional) Provide a description; it will be saved to `.devtour/devtour.json`.
+4. Open the **DEVTOUR** panel in the Activity Bar to see the ordered list of steps. Click any item to jump to the code.
 
-For example if there is an image subfolder under your extension project workspace:
+## Available commands
+- `devtour.addStep` – Adds a step for the active file/line (default shortcut `Ctrl+D Ctrl+A`).
+- `devtour.openStep` – Opens the file and focuses the line for the selected step.
+- `devtour.refreshSteps` – Reloads the steps list manually.
+- `devtour.openConfig` – Opens (or creates) the `.devtour/devtour.json` file.
 
-\!\[feature X\]\(images/feature-x.png\)
+## Panel and menus
+- **DevTour Explorer** in the Activity Bar lists steps ordered by the `order` field.
+- Use the title bar actions (refresh/edit icons) to update the view or open the configuration file.
+- The editor context menu shows “Devtour: Add DevTour Step” whenever the editor has focus.
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+## `devtour.json` structure
+Each entry is stored as an object with the following shape:
+
+```json
+{
+  "file": "src/app.ts",
+  "line": 42,
+  "description": "Explains how the app is initialized",
+  "order": 3
+}
+```
+
+You can edit the JSON manually; the view refreshes automatically when the file changes.
 
 ## Requirements
+- VS Code 1.101.0 or later.
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+## Development
+```bash
+npm install
+npm run lint
+```
 
-## Extension Settings
+Use `npm test` to run the test suite provided by `@vscode/test-cli`.
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+## Notes
+- The extension only reads/writes inside the open workspace.
+- If you delete `.devtour/devtour.json`, the view will remain empty until you add new steps.
 
-For example:
-
-This extension contributes the following settings:
-
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
-
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code.  Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux)
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux)
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+Enjoy creating guided tours for your projects!
