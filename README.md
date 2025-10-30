@@ -7,6 +7,7 @@ DevTour is a Visual Studio Code extension that helps you document and explore a 
 - **Quick access to the configuration file**: Open the DevTour JSON with a single click to edit it manually if needed.
 - **Jump straight to the code**: Selecting a step focuses the corresponding file and line in the editor.
 - **Keyboard shortcut**: Capture the current context without reaching for the mouse.
+- **Line decorations**: Each tracked line shows a DevTour marker in the gutter so you can spot steps directly in the editor.
 
 ## How to use
 1. Open the project you want to document.

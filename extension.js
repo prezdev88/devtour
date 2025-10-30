@@ -3,11 +3,27 @@ const fs = require('fs');
 const path = require('path');
 
 let devTourTreeDataProvider;
+let devTourDecorationType;
 
 function activate(context) {
     checkForExistingDevTourFile();
 
     devTourTreeDataProvider = new DevTourTreeDataProvider();
+
+    const lightIcon = vscode.Uri.file(path.join(context.extensionPath, 'media', 'devtour-gutter-light.svg'));
+    const darkIcon = vscode.Uri.file(path.join(context.extensionPath, 'media', 'devtour-gutter-dark.svg'));
+    devTourDecorationType = vscode.window.createTextEditorDecorationType({
+        gutterIconSize: 'contain',
+        overviewRulerLane: vscode.OverviewRulerLane.Center,
+        overviewRulerColor: new vscode.ThemeColor('editorInfo.foreground'),
+        light: {
+            gutterIconPath: lightIcon
+        },
+        dark: {
+            gutterIconPath: darkIcon
+        }
+    });
+    context.subscriptions.push(devTourDecorationType);
 
     const addStepCmd = vscode.commands.registerCommand('devtour.addStep', () => {
         handleAddStep();
@@ -19,6 +35,7 @@ function activate(context) {
 
     const refreshCmd = vscode.commands.registerCommand('devtour.refreshSteps', () => {
         devTourTreeDataProvider?.refresh();
+        refreshDevTourDecorations();
     });
 
     const openConfigCmd = vscode.commands.registerCommand('devtour.openConfig', () => {
@@ -35,10 +52,13 @@ function activate(context) {
         refreshCmd,
         openConfigCmd,
         deleteStepCmd,
-        vscode.window.registerTreeDataProvider('devtourSteps', devTourTreeDataProvider)
+        vscode.window.registerTreeDataProvider('devtourSteps', devTourTreeDataProvider),
+        vscode.window.onDidChangeActiveTextEditor(() => refreshDevTourDecorations()),
+        vscode.window.onDidChangeVisibleTextEditors(() => refreshDevTourDecorations())
     );
 
     registerDevTourWatcher(context);
+    refreshDevTourDecorations();
 }
 
 function checkForExistingDevTourFile() {
@@ -113,6 +133,7 @@ function saveStepToFile(projectPath, step) {
     fs.writeFileSync(devtourFile, JSON.stringify(steps, null, 2));
     vscode.window.showInformationMessage(`DevTour step #${order} added at line ${step.line}`);
     devTourTreeDataProvider?.refresh();
+    refreshDevTourDecorations();
 }
 
 function readDevTourSteps(projectPath) {
@@ -139,9 +160,18 @@ function registerDevTourWatcher(context) {
 
     context.subscriptions.push(
         watcher,
-        watcher.onDidChange(() => devTourTreeDataProvider?.refresh()),
-        watcher.onDidCreate(() => devTourTreeDataProvider?.refresh()),
-        watcher.onDidDelete(() => devTourTreeDataProvider?.refresh())
+        watcher.onDidChange(() => {
+            devTourTreeDataProvider?.refresh();
+            refreshDevTourDecorations();
+        }),
+        watcher.onDidCreate(() => {
+            devTourTreeDataProvider?.refresh();
+            refreshDevTourDecorations();
+        }),
+        watcher.onDidDelete(() => {
+            devTourTreeDataProvider?.refresh();
+            refreshDevTourDecorations();
+        })
     );
 }
 
@@ -183,6 +213,7 @@ function openDevTourConfig() {
     if (!fs.existsSync(devtourFile)) {
         fs.writeFileSync(devtourFile, JSON.stringify([], null, 2));
         devTourTreeDataProvider?.refresh();
+        refreshDevTourDecorations();
     }
 
     vscode.workspace.openTextDocument(devtourFile).then(
@@ -235,6 +266,7 @@ async function deleteDevTourStep(item) {
     fs.writeFileSync(devtourFile, JSON.stringify(reordered, null, 2));
     vscode.window.showInformationMessage('DevTour step removed.');
     devTourTreeDataProvider?.refresh();
+    refreshDevTourDecorations();
 }
 
 function devTourStepsEqual(a, b) {
@@ -339,6 +371,63 @@ class DevTourTreeItem extends vscode.TreeItem {
             }
         ];
     }
+}
+
+function refreshDevTourDecorations() {
+    if (!devTourDecorationType) return;
+
+    const projectPath = getWorkspaceFolderPath();
+    if (!projectPath) {
+        clearDecorations();
+        return;
+    }
+
+    const steps = readDevTourSteps(projectPath);
+    const stepsByFile = steps.reduce((accumulator, step) => {
+        if (!step.file) return accumulator;
+        const key = normalizePath(step.file);
+        if (!accumulator.has(key)) {
+            accumulator.set(key, []);
+        }
+        accumulator.get(key).push(step);
+        return accumulator;
+    }, new Map());
+
+    vscode.window.visibleTextEditors.forEach(editor => {
+        applyDecorationsToEditor(editor, projectPath, stepsByFile);
+    });
+}
+
+function clearDecorations() {
+    if (!devTourDecorationType) return;
+    vscode.window.visibleTextEditors.forEach(editor => {
+        editor.setDecorations(devTourDecorationType, []);
+    });
+}
+
+function applyDecorationsToEditor(editor, projectPath, stepsByFile) {
+    if (!editor || editor.document.uri.scheme !== 'file') {
+        if (editor) {
+            editor.setDecorations(devTourDecorationType, []);
+        }
+        return;
+    }
+
+    const relative = path.relative(projectPath, editor.document.uri.fsPath);
+    const key = normalizePath(relative);
+    const steps = stepsByFile.get(key) || [];
+
+    const ranges = steps.map(step => {
+        const lineIndex = Math.max((step.line || 1) - 1, 0);
+        return new vscode.Range(lineIndex, 0, lineIndex, 0);
+    });
+
+    editor.setDecorations(devTourDecorationType, ranges);
+}
+
+function normalizePath(value) {
+    if (!value) return '';
+    return value.replace(/\\/g, '/');
 }
 
 function deactivate() { }
