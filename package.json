@@ -12,20 +12,60 @@
   "activationEvents": [],
   "main": "./extension.js",
   "contributes": {
-    "commands": [
-    {
-      "command": "devtour.start",
-      "title": "Devtour: Start DevTour"
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "devtour",
+          "title": "DEVTOUR",
+          "icon": "media/devtour.svg"
+        }
+      ]
     },
-    {
-      "command": "devtour.addStep",
-      "title": "Devtour: Add DevTour Step"
-    }],
+    "views": {
+      "devtour": [
+        {
+          "id": "devtourSteps",
+          "name": "DevTour Explorer"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "devtour.addStep",
+        "title": "Devtour: Add DevTour Step"
+      },
+      {
+        "command": "devtour.openStep",
+        "title": "Devtour: Open DevTour Step"
+      },
+      {
+        "command": "devtour.refreshSteps",
+        "title": "Devtour: Refresh Steps",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "devtour.openConfig",
+        "title": "Devtour: Open DevTour Config",
+        "icon": "$(list-selection)"
+      }
+    ],
     "menus": {
       "editor/context": [
         {
           "command": "devtour.addStep",
           "when": "editorTextFocus",
+          "group": "navigation"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "devtour.refreshSteps",
+          "when": "view == devtourSteps",
+          "group": "navigation"
+        },
+        {
+          "command": "devtour.openConfig",
+          "when": "view == devtourSteps",
           "group": "navigation"
         }
       ]

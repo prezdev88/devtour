@@ -2,25 +2,44 @@ const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
 
+let devTourTreeDataProvider;
+
 function activate(context) {
     checkForExistingDevTourFile();
 
-    const startCmd = vscode.commands.registerCommand('devtour.start', () => {
-        vscode.window.showInformationMessage('DevTour started!');
-    });
+    devTourTreeDataProvider = new DevTourTreeDataProvider();
 
     const addStepCmd = vscode.commands.registerCommand('devtour.addStep', () => {
         handleAddStep();
     });
 
-    context.subscriptions.push(startCmd, addStepCmd);
+    const openStepCmd = vscode.commands.registerCommand('devtour.openStep', step => {
+        openDevTourStep(step);
+    });
+
+    const refreshCmd = vscode.commands.registerCommand('devtour.refreshSteps', () => {
+        devTourTreeDataProvider?.refresh();
+    });
+
+    const openConfigCmd = vscode.commands.registerCommand('devtour.openConfig', () => {
+        openDevTourConfig();
+    });
+
+    context.subscriptions.push(
+        addStepCmd,
+        openStepCmd,
+        refreshCmd,
+        openConfigCmd,
+        vscode.window.registerTreeDataProvider('devtourSteps', devTourTreeDataProvider)
+    );
+
+    registerDevTourWatcher(context);
 }
 
 function checkForExistingDevTourFile() {
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders || workspaceFolders.length === 0) return;
+    const projectPath = getWorkspaceFolderPath();
+    if (!projectPath) return;
 
-    const projectPath = workspaceFolders[0].uri.fsPath;
     const devtourPath = path.join(projectPath, '.devtour', 'devtour.json');
 
     if (fs.existsSync(devtourPath)) {
@@ -76,18 +95,10 @@ function saveStepToFile(projectPath, step) {
     const devtourFile = path.join(devtourDir, 'devtour.json');
 
     if (!fs.existsSync(devtourDir)) {
-        fs.mkdirSync(devtourDir);
+        fs.mkdirSync(devtourDir, { recursive: true });
     }
 
-    let steps = [];
-    if (fs.existsSync(devtourFile)) {
-        try {
-            steps = JSON.parse(fs.readFileSync(devtourFile, 'utf8'));
-            if (!Array.isArray(steps)) steps = [];
-        } catch (err) {
-            steps = [];
-        }
-    }
+    const steps = readDevTourSteps(projectPath);
 
     // Añadir campo 'order' automáticamente
     const order = steps.length + 1;
@@ -96,6 +107,169 @@ function saveStepToFile(projectPath, step) {
     steps.push(step);
     fs.writeFileSync(devtourFile, JSON.stringify(steps, null, 2));
     vscode.window.showInformationMessage(`DevTour step #${order} added at line ${step.line}`);
+    devTourTreeDataProvider?.refresh();
+}
+
+function readDevTourSteps(projectPath) {
+    const devtourFile = path.join(projectPath, '.devtour', 'devtour.json');
+    if (!fs.existsSync(devtourFile)) {
+        return [];
+    }
+
+    try {
+        const data = fs.readFileSync(devtourFile, 'utf8');
+        const parsed = JSON.parse(data);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+        return [];
+    }
+}
+
+function registerDevTourWatcher(context) {
+    const workspaceFolder = getPrimaryWorkspaceFolder();
+    if (!workspaceFolder) return;
+
+    const pattern = new vscode.RelativePattern(workspaceFolder, '.devtour/devtour.json');
+    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+
+    context.subscriptions.push(
+        watcher,
+        watcher.onDidChange(() => devTourTreeDataProvider?.refresh()),
+        watcher.onDidCreate(() => devTourTreeDataProvider?.refresh()),
+        watcher.onDidDelete(() => devTourTreeDataProvider?.refresh())
+    );
+}
+
+function openDevTourStep(step) {
+    const projectPath = getWorkspaceFolderPath();
+    if (!projectPath) {
+        vscode.window.showWarningMessage('No workspace open.');
+        return;
+    }
+
+    const targetPath = path.join(projectPath, step.file);
+
+    vscode.workspace.openTextDocument(targetPath).then(
+        document => vscode.window.showTextDocument(document).then(editor => {
+            const line = Math.max((step.line || 1) - 1, 0);
+            const position = new vscode.Position(line, 0);
+            const selection = new vscode.Selection(position, position);
+            editor.selection = selection;
+            editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+        }),
+        err => vscode.window.showErrorMessage(`Could not open DevTour step: ${err.message}`)
+    );
+}
+
+function openDevTourConfig() {
+    const projectPath = getWorkspaceFolderPath();
+    if (!projectPath) {
+        vscode.window.showWarningMessage('No workspace open.');
+        return;
+    }
+
+    const devtourDir = path.join(projectPath, '.devtour');
+    const devtourFile = path.join(devtourDir, 'devtour.json');
+
+    if (!fs.existsSync(devtourDir)) {
+        fs.mkdirSync(devtourDir, { recursive: true });
+    }
+
+    if (!fs.existsSync(devtourFile)) {
+        fs.writeFileSync(devtourFile, JSON.stringify([], null, 2));
+        devTourTreeDataProvider?.refresh();
+    }
+
+    vscode.workspace.openTextDocument(devtourFile).then(
+        document => vscode.window.showTextDocument(document),
+        err => {
+            if (err && err.message) {
+                vscode.window.showErrorMessage(`Could not open DevTour configuration: ${err.message}`);
+            }
+        }
+    );
+}
+
+function getPrimaryWorkspaceFolder() {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders || workspaceFolders.length === 0) return undefined;
+    return workspaceFolders[0];
+}
+
+function getWorkspaceFolderPath() {
+    const workspaceFolder = getPrimaryWorkspaceFolder();
+    return workspaceFolder ? workspaceFolder.uri.fsPath : undefined;
+}
+
+class DevTourTreeDataProvider {
+    constructor() {
+        this._onDidChangeTreeData = new vscode.EventEmitter();
+        this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+    }
+
+    refresh() {
+        this._onDidChangeTreeData.fire();
+    }
+
+    getTreeItem(element) {
+        return element;
+    }
+
+    getChildren(element) {
+        if (element) {
+            return [];
+        }
+
+        const projectPath = getWorkspaceFolderPath();
+        if (!projectPath) return [];
+
+        const steps = readDevTourSteps(projectPath);
+        return steps
+            .slice()
+            .sort((a, b) => {
+                const orderA = typeof a.order === 'number' ? a.order : Number.MAX_SAFE_INTEGER;
+                const orderB = typeof b.order === 'number' ? b.order : Number.MAX_SAFE_INTEGER;
+                if (orderA !== orderB) return orderA - orderB;
+
+                const fileA = a.file || '';
+                const fileB = b.file || '';
+                if (fileA !== fileB) return fileA.localeCompare(fileB);
+
+                const lineA = typeof a.line === 'number' ? a.line : Number.MAX_SAFE_INTEGER;
+                const lineB = typeof b.line === 'number' ? b.line : Number.MAX_SAFE_INTEGER;
+                return lineA - lineB;
+            })
+            .map(step => new DevTourTreeItem(step, projectPath));
+    }
+}
+
+class DevTourTreeItem extends vscode.TreeItem {
+    constructor(step, projectPath) {
+        const fileName = step.file ? path.basename(step.file) : undefined;
+        const label = fileName ? `${fileName}${step.line ? `:${step.line}` : ''}` : (step.line ? `Line ${step.line}` : 'Step');
+        super(label, vscode.TreeItemCollapsibleState.None);
+
+        this.step = step;
+        const tooltipLines = [];
+        if (step.file) {
+            tooltipLines.push(`${step.file}${step.line ? `:${step.line}` : ''}`);
+        } else if (step.line) {
+            tooltipLines.push(`Line ${step.line}`);
+        }
+        if (step.description) {
+            tooltipLines.push(`Description: ${step.description}`);
+        }
+        this.tooltip = tooltipLines.join('\n');
+        this.description = step.description || undefined;
+        this.command = {
+            command: 'devtour.openStep',
+            title: 'Open DevTour Step',
+            arguments: [step]
+        };
+        this.resourceUri = step.file ? vscode.Uri.file(path.join(projectPath, step.file)) : undefined;
+        this.iconPath = new vscode.ThemeIcon('debug-step-over');
+        this.contextValue = 'devTourStep';
+    }
 }
 
 function deactivate() { }
