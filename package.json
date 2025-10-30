@@ -47,13 +47,18 @@
         "command": "devtour.openConfig",
         "title": "Devtour: Open DevTour Config",
         "icon": "$(list-selection)"
+      },
+      {
+        "command": "devtour.deleteStep",
+        "title": "Devtour: Delete DevTour Step",
+        "icon": "$(dash)"
       }
     ],
     "menus": {
       "editor/context": [
         {
           "command": "devtour.addStep",
-          "when": "editorTextFocus",
+          "when": "editorFocus",
           "group": "navigation"
         }
       ],
@@ -67,6 +72,13 @@
           "command": "devtour.openConfig",
           "when": "view == devtourSteps",
           "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "devtour.deleteStep",
+          "when": "view == devtourSteps && viewItem == devTourStep",
+          "group": "inline@1"
         }
       ]
     },

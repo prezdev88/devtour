@@ -25,11 +25,16 @@ function activate(context) {
         openDevTourConfig();
     });
 
+    const deleteStepCmd = vscode.commands.registerCommand('devtour.deleteStep', item => {
+        deleteDevTourStep(item);
+    });
+
     context.subscriptions.push(
         addStepCmd,
         openStepCmd,
         refreshCmd,
         openConfigCmd,
+        deleteStepCmd,
         vscode.window.registerTreeDataProvider('devtourSteps', devTourTreeDataProvider)
     );
 
@@ -190,6 +195,62 @@ function openDevTourConfig() {
     );
 }
 
+async function deleteDevTourStep(item) {
+    const projectPath = getWorkspaceFolderPath();
+    if (!projectPath) {
+        vscode.window.showWarningMessage('No workspace open.');
+        return;
+    }
+
+    const step = item?.step ?? item;
+    if (!step) {
+        vscode.window.showWarningMessage('Could not determine which DevTour step to delete.');
+        return;
+    }
+
+    const fileName = step.file ? path.basename(step.file) : 'Unknown file';
+    const lineLabel = typeof step.line === 'number' ? `:${step.line}` : '';
+    const confirm = await vscode.window.showWarningMessage(
+        `Remove step ${fileName}${lineLabel}?`,
+        { modal: true },
+        'Remove'
+    );
+
+    if (confirm !== 'Remove') return;
+
+    const steps = readDevTourSteps(projectPath);
+    const remaining = steps.filter(existing => !devTourStepsEqual(existing, step));
+
+    if (remaining.length === steps.length) {
+        vscode.window.showWarningMessage('Step not found in DevTour configuration.');
+        return;
+    }
+
+    const reordered = remaining.map((existing, index) => ({
+        ...existing,
+        order: index + 1
+    }));
+
+    const devtourFile = path.join(projectPath, '.devtour', 'devtour.json');
+    fs.writeFileSync(devtourFile, JSON.stringify(reordered, null, 2));
+    vscode.window.showInformationMessage('DevTour step removed.');
+    devTourTreeDataProvider?.refresh();
+}
+
+function devTourStepsEqual(a, b) {
+    if (!a || !b) return false;
+
+    if (typeof a.order === 'number' && typeof b.order === 'number') {
+        return a.order === b.order;
+    }
+
+    return (
+        a.file === b.file &&
+        a.line === b.line &&
+        (a.description || '') === (b.description || '')
+    );
+}
+
 function getPrimaryWorkspaceFolder() {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders || workspaceFolders.length === 0) return undefined;
@@ -269,6 +330,14 @@ class DevTourTreeItem extends vscode.TreeItem {
         this.resourceUri = step.file ? vscode.Uri.file(path.join(projectPath, step.file)) : undefined;
         this.iconPath = new vscode.ThemeIcon('debug-step-over');
         this.contextValue = 'devTourStep';
+        this.buttons = [
+            {
+                command: 'devtour.deleteStep',
+                tooltip: 'Delete this DevTour step',
+                icon: new vscode.ThemeIcon('dash'),
+                arguments: [this]
+            }
+        ];
     }
 }
 
