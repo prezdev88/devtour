@@ -55,6 +55,13 @@ npm install
 npm run lint
 ```
 
+### Build a local VSIX (pre-release)
+Use the VS Code packaging CLI to generate an installable `.vsix`:
+
+```bash
+npx @vscode/vsce package --pre-release
+```
+
 ## Notes
 - The extension only reads/writes inside the open workspace.
 - If you delete `.devtour/devtour.json`, the view will remain empty until you add new steps.

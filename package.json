@@ -1,8 +1,9 @@
 {
   "name": "devtour",
+  "publisher": "prezdev",
   "displayName": "devtour",
   "description": "Visualiza el flujo lógico de un proyecto marcando clases y métodos clave directamente desde el editor.",
-  "version": "0.0.1",
+  "version": "0.1.0-RC1",
   "engines": {
     "vscode": "^1.101.0"
   },
@@ -16,7 +17,7 @@
       "activitybar": [
         {
           "id": "devtour",
-          "title": "DEVTOUR",
+          "title": "Dev Tour",
           "icon": "media/devtour.svg"
         }
       ]
@@ -157,5 +158,10 @@
     "@types/vscode": "^1.101.0",
     "@types/node": "20.x",
     "eslint": "^9.25.1"
+  },
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/prezdev88/devtour.git"
   }
 }
