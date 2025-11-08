@@ -49,8 +49,6 @@ npm install
 npm run lint
 ```
 
-Use `npm test` to run the test suite provided by `@vscode/test-cli`.
-
 ## Notes
 - The extension only reads/writes inside the open workspace.
 - If you delete `.devtour/devtour.json`, the view will remain empty until you add new steps.
