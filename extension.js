@@ -1,6 +1,7 @@
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 let devTourTreeDataProvider;
 let devTourDecorationType;
@@ -76,6 +77,18 @@ function activate(context) {
         devTourSession?.stop();
     });
 
+    const createTourCmd = vscode.commands.registerCommand('devtour.createTour', () => {
+        createDevTour();
+    });
+
+    const selectTourCmd = vscode.commands.registerCommand('devtour.selectTour', item => {
+        if (item?.tourId) {
+            setActiveTourById(item.tourId);
+        } else {
+            selectDevTour();
+        }
+    });
+
     const hoverProvider = vscode.languages.registerHoverProvider({ scheme: 'file' }, {
         provideHover(document, position) {
             return provideDevTourHover(document, position);
@@ -98,6 +111,8 @@ function activate(context) {
         nextStepCmd,
         previousStepCmd,
         stopTourCmd,
+        createTourCmd,
+        selectTourCmd,
         hoverProvider,
         controlsViewRegistration,
         vscode.window.registerTreeDataProvider('devtourSteps', devTourTreeDataProvider),
@@ -160,10 +175,16 @@ async function handleAddStep() {
         description: description || ''
     };
 
-    saveStepToFile(workspaceFolder.uri.fsPath, step);
+    const selectedTour = await promptForTourSelectionOrCreation(workspaceFolder.uri.fsPath);
+    if (!selectedTour) {
+        vscode.window.showInformationMessage('DevTour step creation cancelled.');
+        return;
+    }
+
+    addStepToTour(workspaceFolder.uri.fsPath, step, selectedTour.id);
 }
 
-function saveStepToFile(projectPath, step) {
+function addStepToTour(projectPath, step, targetTourId) {
     const devtourDir = path.join(projectPath, '.devtour');
     const devtourFile = path.join(devtourDir, 'devtour.json');
 
@@ -171,33 +192,35 @@ function saveStepToFile(projectPath, step) {
         fs.mkdirSync(devtourDir, { recursive: true });
     }
 
-    const steps = readDevTourSteps(projectPath);
+    let data = loadDevTourData(projectPath);
+    if (data.tours.length === 0) {
+        const defaultTour = createTourObject('Main Tour');
+        data.tours.push(defaultTour);
+        data.activeTourId = defaultTour.id;
+    }
 
-    // Añadir campo 'order' automáticamente
-    const order = steps.length + 1;
-    step.order = order;
+    let targetTour = targetTourId ? findTourById(data, targetTourId) : getActiveTour(data);
+    if (!targetTour) {
+        vscode.window.showErrorMessage('No DevTour found. Please create a tour first.');
+        return;
+    }
 
-    steps.push(step);
-    fs.writeFileSync(devtourFile, JSON.stringify(steps, null, 2));
-    vscode.window.showInformationMessage(`DevTour step #${order} added at line ${step.line}`);
+    data.activeTourId = targetTour.id;
+
+    const order = targetTour.steps.length + 1;
+    const enrichedStep = {
+        ...step,
+        id: crypto.randomUUID(),
+        order,
+        tourId: targetTour.id
+    };
+
+    targetTour.steps.push(enrichedStep);
+    saveDevTourData(devtourFile, data);
+    vscode.window.showInformationMessage(`DevTour step #${order} added to "${targetTour.name}" at line ${step.line}`);
     devTourTreeDataProvider?.refresh();
     refreshDevTourDecorations();
     devTourSession?.reloadSteps();
-}
-
-function readDevTourSteps(projectPath) {
-    const devtourFile = path.join(projectPath, '.devtour', 'devtour.json');
-    if (!fs.existsSync(devtourFile)) {
-        return [];
-    }
-
-    try {
-        const data = fs.readFileSync(devtourFile, 'utf8');
-        const parsed = JSON.parse(data);
-        return Array.isArray(parsed) ? parsed : [];
-    } catch (err) {
-        return [];
-    }
 }
 
 function registerDevTourWatcher(context) {
@@ -263,7 +286,12 @@ function openDevTourConfig() {
     }
 
     if (!fs.existsSync(devtourFile)) {
-        fs.writeFileSync(devtourFile, JSON.stringify([], null, 2));
+        const defaultTour = createTourObject('Main Tour');
+        const initialData = {
+            tours: [defaultTour],
+            activeTourId: defaultTour.id
+        };
+        saveDevTourData(devtourFile, initialData);
         devTourTreeDataProvider?.refresh();
         refreshDevTourDecorations();
         devTourSession?.reloadSteps();
@@ -302,21 +330,28 @@ async function deleteDevTourStep(item) {
 
     if (confirm !== 'Remove') return;
 
-    const steps = readDevTourSteps(projectPath);
-    const remaining = steps.filter(existing => !devTourStepsEqual(existing, step));
+    const devtourFile = path.join(projectPath, '.devtour', 'devtour.json');
+    const data = loadDevTourData(projectPath);
+    const tourId = item?.tourId || step.tourId || data.activeTourId;
+    const targetTour = findTourById(data, tourId) || findTourContainingStep(data, step);
 
-    if (remaining.length === steps.length) {
+    if (!targetTour) {
         vscode.window.showWarningMessage('Step not found in DevTour configuration.');
         return;
     }
 
-    const reordered = remaining.map((existing, index) => ({
+    const filtered = targetTour.steps.filter(existing => !devTourStepsEqual(existing, step));
+    if (filtered.length === targetTour.steps.length) {
+        vscode.window.showWarningMessage('Step not found in DevTour configuration.');
+        return;
+    }
+
+    targetTour.steps = filtered.map((existing, index) => ({
         ...existing,
         order: index + 1
     }));
 
-    const devtourFile = path.join(projectPath, '.devtour', 'devtour.json');
-    fs.writeFileSync(devtourFile, JSON.stringify(reordered, null, 2));
+    saveDevTourData(devtourFile, data);
     vscode.window.showInformationMessage('DevTour step removed.');
     devTourTreeDataProvider?.refresh();
     refreshDevTourDecorations();
@@ -326,8 +361,12 @@ async function deleteDevTourStep(item) {
 function devTourStepsEqual(a, b) {
     if (!a || !b) return false;
 
-    if (typeof a.order === 'number' && typeof b.order === 'number') {
-        return a.order === b.order;
+    if (a.id && b.id) {
+        return a.id === b.id;
+    }
+
+    if (a.tourId && b.tourId && a.tourId !== b.tourId) {
+        return false;
     }
 
     return (
@@ -363,40 +402,59 @@ class DevTourTreeDataProvider {
     }
 
     getChildren(element) {
-        if (element) {
-            return [];
-        }
-
         const projectPath = getWorkspaceFolderPath();
         if (!projectPath) return [];
 
-        const steps = readDevTourSteps(projectPath);
-        return steps
-            .slice()
-            .sort((a, b) => {
-                const orderA = typeof a.order === 'number' ? a.order : Number.MAX_SAFE_INTEGER;
-                const orderB = typeof b.order === 'number' ? b.order : Number.MAX_SAFE_INTEGER;
-                if (orderA !== orderB) return orderA - orderB;
+        const data = loadDevTourData(projectPath);
 
-                const fileA = a.file || '';
-                const fileB = b.file || '';
-                if (fileA !== fileB) return fileA.localeCompare(fileB);
+        if (!element) {
+            return data.tours.map(tour => new DevTourTourItem(tour, data.activeTourId === tour.id));
+        }
 
-                const lineA = typeof a.line === 'number' ? a.line : Number.MAX_SAFE_INTEGER;
-                const lineB = typeof b.line === 'number' ? b.line : Number.MAX_SAFE_INTEGER;
-                return lineA - lineB;
-            })
-            .map(step => new DevTourTreeItem(step, projectPath));
+        if (element instanceof DevTourTourItem) {
+            return element.tour.steps
+                .slice()
+                .sort((a, b) => {
+                    const orderA = typeof a.order === 'number' ? a.order : Number.MAX_SAFE_INTEGER;
+                    const orderB = typeof b.order === 'number' ? b.order : Number.MAX_SAFE_INTEGER;
+                    if (orderA !== orderB) return orderA - orderB;
+
+                    const fileA = a.file || '';
+                    const fileB = b.file || '';
+                    if (fileA !== fileB) return fileA.localeCompare(fileB);
+
+                    const lineA = typeof a.line === 'number' ? a.line : Number.MAX_SAFE_INTEGER;
+                    const lineB = typeof b.line === 'number' ? b.line : Number.MAX_SAFE_INTEGER;
+                    return lineA - lineB;
+                })
+                .map(step => new DevTourTreeItem(step, projectPath, element.tour.id, element.isActive));
+        }
+
+        return [];
+    }
+}
+
+class DevTourTourItem extends vscode.TreeItem {
+    constructor(tour, isActive) {
+        super(tour.name || 'Untitled Tour', vscode.TreeItemCollapsibleState.Expanded);
+        this.tour = tour;
+        this.isActive = isActive;
+        this.contextValue = 'devTourTour';
+        this.description = isActive ? 'Active tour' : undefined;
+        this.iconPath = isActive ? new vscode.ThemeIcon('star-full') : new vscode.ThemeIcon('folder');
+        this.tooltip = isActive ? `${tour.name} (active)` : tour.name;
+        this.tourId = tour.id;
     }
 }
 
 class DevTourTreeItem extends vscode.TreeItem {
-    constructor(step, projectPath) {
+    constructor(step, projectPath, tourId, tourIsActive) {
         const fileName = step.file ? path.basename(step.file) : undefined;
         const label = fileName ? `${fileName}${step.line ? `:${step.line}` : ''}` : (step.line ? `Line ${step.line}` : 'Step');
         super(label, vscode.TreeItemCollapsibleState.None);
 
         this.step = step;
+        this.tourId = tourId;
         const tooltipLines = [];
         if (step.file) {
             tooltipLines.push(`${step.file}${step.line ? `:${step.line}` : ''}`);
@@ -414,7 +472,7 @@ class DevTourTreeItem extends vscode.TreeItem {
             arguments: [step]
         };
         this.resourceUri = step.file ? vscode.Uri.file(path.join(projectPath, step.file)) : undefined;
-        this.iconPath = new vscode.ThemeIcon('debug-step-over');
+        this.iconPath = tourIsActive ? new vscode.ThemeIcon('debug-step-over') : new vscode.ThemeIcon('circle-large-outline');
         this.contextValue = 'devTourStep';
         this.buttons = [
             {
@@ -427,6 +485,121 @@ class DevTourTreeItem extends vscode.TreeItem {
     }
 }
 
+function createTourObject(name) {
+    return {
+        id: crypto.randomUUID(),
+        name: name || 'Untitled Tour',
+        steps: []
+    };
+}
+
+function loadDevTourData(projectPath) {
+    const devtourFile = path.join(projectPath, '.devtour', 'devtour.json');
+    if (!fs.existsSync(devtourFile)) {
+        return { tours: [], activeTourId: undefined };
+    }
+
+    try {
+        const raw = JSON.parse(fs.readFileSync(devtourFile, 'utf8'));
+        return normalizeDevTourData(raw);
+    } catch (err) {
+        return { tours: [], activeTourId: undefined };
+    }
+}
+
+function normalizeDevTourData(raw) {
+    if (Array.isArray(raw)) {
+        const defaultTour = createTourObject('Main Tour');
+        defaultTour.steps = raw.map((step, index) => ({
+            ...step,
+            id: step.id || crypto.randomUUID(),
+            order: typeof step.order === 'number' ? step.order : index + 1,
+            tourId: defaultTour.id
+        }));
+        return { tours: [defaultTour], activeTourId: defaultTour.id };
+    }
+
+    const tours = Array.isArray(raw?.tours) ? raw.tours : [];
+    const normalizedTours = tours.map((tour, idx) => {
+        const resolvedId = tour.id || crypto.randomUUID();
+        return {
+            id: resolvedId,
+            name: tour.name || `Tour ${idx + 1}`,
+            steps: Array.isArray(tour.steps)
+                ? tour.steps.map((step, index) => ({
+                    ...step,
+                    id: step.id || crypto.randomUUID(),
+                    order: typeof step.order === 'number' ? step.order : index + 1,
+                    tourId: resolvedId
+                }))
+                : []
+        };
+    });
+
+    const activeTourId = raw?.activeTourId && normalizedTours.some(t => t.id === raw.activeTourId)
+        ? raw.activeTourId
+        : (normalizedTours[0]?.id);
+
+    return {
+        tours: normalizedTours,
+        activeTourId
+    };
+}
+
+function saveDevTourData(devtourFile, data) {
+    const dir = path.dirname(devtourFile);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    const serializable = {
+        tours: data.tours.map(tour => ({
+            id: tour.id,
+            name: tour.name,
+            steps: tour.steps.map(step => ({
+                ...step,
+                tourId: tour.id
+            }))
+        })),
+        activeTourId: data.activeTourId
+    };
+    fs.writeFileSync(devtourFile, JSON.stringify(serializable, null, 2));
+}
+
+function getActiveTour(data) {
+    if (!data || !data.tours) return undefined;
+    let tour = data.tours.find(t => t.id === data.activeTourId);
+    if (!tour) {
+        tour = data.tours[0];
+        if (tour) {
+            data.activeTourId = tour.id;
+        }
+    }
+    return tour;
+}
+
+function getAllDevTourSteps(projectPath) {
+    const data = loadDevTourData(projectPath);
+    const steps = [];
+    data.tours.forEach(tour => {
+        tour.steps.forEach(step => {
+            steps.push({
+                ...step,
+                tourId: tour.id
+            });
+        });
+    });
+    return steps;
+}
+
+function findTourById(data, tourId) {
+    if (!tourId) return undefined;
+    return data.tours.find(tour => tour.id === tourId);
+}
+
+function findTourContainingStep(data, targetStep) {
+    return data.tours.find(tour => tour.steps.some(step => devTourStepsEqual(step, targetStep)));
+}
+
 class DevTourControlsProvider {
     constructor(extensionUri) {
         this.extensionUri = extensionUri;
@@ -436,7 +609,8 @@ class DevTourControlsProvider {
             index: -1,
             total: 0,
             hasSteps: false,
-            description: ''
+            description: '',
+            tourName: 'No tour selected'
         };
     }
 
@@ -542,6 +716,10 @@ function getControlsViewHtml(webview) {
         .status-description {
             color: var(--vscode-descriptionForeground);
         }
+        .status-tour {
+            color: var(--vscode-descriptionForeground);
+            font-size: 11px;
+        }
     </style>
 </head>
 <body>
@@ -556,6 +734,7 @@ function getControlsViewHtml(webview) {
         <div class="status">
             <div class="status-title" id="devtour-statusLabel">DevTour idle</div>
             <div class="status-description" id="devtour-statusDescription">Add steps to begin.</div>
+            <div class="status-tour" id="devtour-statusTour">Tour: none</div>
         </div>
     </div>
     <script nonce="${nonce}">
@@ -567,6 +746,7 @@ function getControlsViewHtml(webview) {
         const stopBtn = document.querySelector('[data-command="devtour.stopTour"]');
         const statusLabel = document.getElementById('devtour-statusLabel');
         const statusDescription = document.getElementById('devtour-statusDescription');
+        const statusTour = document.getElementById('devtour-statusTour');
 
         document.querySelectorAll('button[data-command]').forEach(button => {
             button.addEventListener('click', () => {
@@ -579,10 +759,11 @@ function getControlsViewHtml(webview) {
             const { type, state } = event.data || {};
             if (type !== 'state' || !state) return;
 
-            const { active, index, total, hasSteps, description } = state;
+            const { active, index, total, hasSteps, description, tourName } = state;
             const stepLabel = active && total > 0 ? \`Step \${index + 1} / \${total}\` : 'DevTour idle';
             statusLabel.textContent = stepLabel;
             statusDescription.textContent = description || (hasSteps ? 'Press play to start.' : 'Add steps to begin.');
+            statusTour.textContent = tourName ? \`Tour: \${tourName}\` : 'Tour: none';
 
             startBtn.disabled = !hasSteps;
             prevBtn.disabled = !(active && total > 0 && index > 0);
@@ -620,7 +801,7 @@ function refreshDevTourDecorations() {
         return;
     }
 
-    const steps = readDevTourSteps(projectPath);
+    const steps = getAllDevTourSteps(projectPath);
     const stepsByFile = new Map();
     steps.forEach(step => {
         if (!step.file) return;
@@ -725,6 +906,7 @@ class DevTourSession {
         this.steps = [];
         this.index = -1;
         this.active = false;
+        this.currentTourName = '';
         this.loadSteps();
     }
 
@@ -734,10 +916,14 @@ class DevTourSession {
             this.steps = [];
             this.index = -1;
             this.active = false;
+            this.currentTourName = '';
             this.notifyControls();
             return;
         }
-        this.steps = readDevTourSteps(projectPath).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+        const data = loadDevTourData(projectPath);
+        const activeTour = getActiveTour(data);
+        this.steps = activeTour ? activeTour.steps.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) : [];
+        this.currentTourName = activeTour ? activeTour.name : '';
         this.index = -1;
         this.active = false;
         this.notifyControls();
@@ -753,6 +939,8 @@ class DevTourSession {
             this.notifyControls(this.steps[this.index]);
         } else if (previousActive && this.steps.length === 0) {
             this.stop(false);
+        } else {
+            this.notifyControls();
         }
     }
 
@@ -835,7 +1023,8 @@ class DevTourSession {
             index: this.index,
             total: this.steps.length,
             hasSteps: this.steps.length > 0,
-            description: step ? formatStepDescription(step) : ''
+            description: step ? formatStepDescription(step) : '',
+            tourName: this.currentTourName || 'No tour selected'
         };
         this.controlsProvider.updateState(payload);
     }
@@ -847,3 +1036,142 @@ module.exports = {
     activate,
     deactivate
 };
+async function createDevTour() {
+    const projectPath = getWorkspaceFolderPath();
+    if (!projectPath) {
+        vscode.window.showWarningMessage('No workspace open.');
+        return;
+    }
+
+    const data = loadDevTourData(projectPath);
+    const defaultName = `Tour ${data.tours.length + 1}`;
+
+    const name = await vscode.window.showInputBox({
+        title: 'Create DevTour',
+        prompt: 'Enter a name for the new tour',
+        value: defaultName
+    });
+
+    if (!name) {
+        vscode.window.showInformationMessage('DevTour creation cancelled.');
+        return;
+    }
+
+    const newTour = createTourObject(name.trim());
+    data.tours.push(newTour);
+    data.activeTourId = newTour.id;
+
+    const devtourFile = path.join(projectPath, '.devtour', 'devtour.json');
+    saveDevTourData(devtourFile, data);
+    vscode.window.showInformationMessage(`DevTour "${newTour.name}" created and set as active.`);
+    devTourTreeDataProvider?.refresh();
+    devTourSession?.reloadSteps();
+}
+
+async function selectDevTour() {
+    const projectPath = getWorkspaceFolderPath();
+    if (!projectPath) {
+        vscode.window.showWarningMessage('No workspace open.');
+        return;
+    }
+
+    const data = loadDevTourData(projectPath);
+    if (data.tours.length === 0) {
+        vscode.window.showInformationMessage('No tours available. Create one first.');
+        return;
+    }
+
+    const picks = data.tours.map(tour => ({
+        label: tour.name || 'Untitled Tour',
+        description: tour.id === data.activeTourId ? 'Active tour' : '',
+        tourId: tour.id
+    }));
+
+    const selection = await vscode.window.showQuickPick(picks, {
+        placeHolder: 'Select a DevTour to activate'
+    });
+
+    if (!selection?.tourId) return;
+
+    setActiveTourById(selection.tourId);
+}
+
+function setActiveTourById(tourId) {
+    const projectPath = getWorkspaceFolderPath();
+    if (!projectPath) {
+        vscode.window.showWarningMessage('No workspace open.');
+        return;
+    }
+
+    const devtourFile = path.join(projectPath, '.devtour', 'devtour.json');
+    const data = loadDevTourData(projectPath);
+    const targetTour = findTourById(data, tourId);
+    if (!targetTour) {
+        vscode.window.showWarningMessage('Tour not found.');
+        return;
+    }
+
+    data.activeTourId = targetTour.id;
+    saveDevTourData(devtourFile, data);
+    vscode.window.showInformationMessage(`DevTour "${targetTour.name}" is now active.`);
+    devTourTreeDataProvider?.refresh();
+    devTourSession?.reloadSteps();
+}
+
+async function promptForTourSelectionOrCreation(projectPath) {
+    const devtourFile = path.join(projectPath, '.devtour', 'devtour.json');
+    let data = loadDevTourData(projectPath);
+
+    const createTourWithPrompt = async () => {
+        const defaultName = `Tour ${data.tours.length + 1}`;
+        const name = await vscode.window.showInputBox({
+            title: 'Create DevTour',
+            prompt: 'Enter a name for the new tour',
+            value: defaultName
+        });
+        if (!name) return undefined;
+        const newTour = createTourObject(name.trim());
+        data.tours.push(newTour);
+        data.activeTourId = newTour.id;
+        saveDevTourData(devtourFile, data);
+        vscode.window.showInformationMessage(`DevTour "${newTour.name}" created.`);
+        devTourTreeDataProvider?.refresh();
+        devTourSession?.reloadSteps();
+        return newTour;
+    };
+
+    if (data.tours.length === 0) {
+        return await createTourWithPrompt();
+    }
+
+    const picks = data.tours.map(tour => ({
+        label: tour.name || 'Untitled Tour',
+        description: `${tour.steps.length} step${tour.steps.length === 1 ? '' : 's'}` + (tour.id === data.activeTourId ? ' — Active' : ''),
+        tour
+    }));
+
+    picks.push({
+        label: '$(add) Create new tour',
+        description: 'Start a new DevTour group',
+        create: true
+    });
+
+    const selection = await vscode.window.showQuickPick(picks, {
+        placeHolder: 'Select a tour (or create a new one) for this step'
+    });
+
+    if (!selection) return undefined;
+
+    if (selection.create) {
+        return await createTourWithPrompt();
+    }
+
+    if (data.activeTourId !== selection.tour.id) {
+        data.activeTourId = selection.tour.id;
+        saveDevTourData(devtourFile, data);
+        devTourTreeDataProvider?.refresh();
+        devTourSession?.reloadSteps();
+    }
+
+    return selection.tour;
+}
