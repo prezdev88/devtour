@@ -6,12 +6,22 @@ let devTourTreeDataProvider;
 let devTourDecorationType;
 let devTourStepsCache = new Map();
 let devTourSession;
+let devTourControlsProvider;
+
+const DEVTOUR_CONTROL_COMMANDS = new Set([
+    'devtour.startTour',
+    'devtour.stopTour',
+    'devtour.nextStep',
+    'devtour.previousStep',
+    'devtour.refreshSteps'
+]);
 
 function activate(context) {
     checkForExistingDevTourFile();
 
     devTourTreeDataProvider = new DevTourTreeDataProvider();
-    devTourSession = new DevTourSession();
+    devTourControlsProvider = new DevTourControlsProvider(context.extensionUri);
+    devTourSession = new DevTourSession(devTourControlsProvider);
 
     const lightIcon = vscode.Uri.file(path.join(context.extensionPath, 'media', 'devtour-gutter-light.svg'));
     const darkIcon = vscode.Uri.file(path.join(context.extensionPath, 'media', 'devtour-gutter-dark.svg'));
@@ -62,11 +72,21 @@ function activate(context) {
         devTourSession?.previous();
     });
 
+    const stopTourCmd = vscode.commands.registerCommand('devtour.stopTour', () => {
+        devTourSession?.stop();
+    });
+
     const hoverProvider = vscode.languages.registerHoverProvider({ scheme: 'file' }, {
         provideHover(document, position) {
             return provideDevTourHover(document, position);
         }
     });
+
+    const controlsViewRegistration = vscode.window.registerWebviewViewProvider(
+        'devtourControlsView',
+        devTourControlsProvider,
+        { webviewOptions: { retainContextWhenHidden: true } }
+    );
 
     context.subscriptions.push(
         addStepCmd,
@@ -77,7 +97,9 @@ function activate(context) {
         startTourCmd,
         nextStepCmd,
         previousStepCmd,
+        stopTourCmd,
         hoverProvider,
+        controlsViewRegistration,
         vscode.window.registerTreeDataProvider('devtourSteps', devTourTreeDataProvider),
         vscode.window.onDidChangeActiveTextEditor(() => refreshDevTourDecorations()),
         vscode.window.onDidChangeVisibleTextEditors(() => refreshDevTourDecorations())
@@ -405,6 +427,189 @@ class DevTourTreeItem extends vscode.TreeItem {
     }
 }
 
+class DevTourControlsProvider {
+    constructor(extensionUri) {
+        this.extensionUri = extensionUri;
+        this.webviewView = undefined;
+        this.state = {
+            active: false,
+            index: -1,
+            total: 0,
+            hasSteps: false,
+            description: ''
+        };
+    }
+
+    resolveWebviewView(webviewView) {
+        this.webviewView = webviewView;
+        const webview = webviewView.webview;
+        webview.options = {
+            enableScripts: true,
+            localResourceRoots: [this.extensionUri]
+        };
+        webview.html = getControlsViewHtml(webview);
+        webview.onDidReceiveMessage(message => {
+            if (!message || typeof message.command !== 'string') return;
+            if (!DEVTOUR_CONTROL_COMMANDS.has(message.command)) return;
+            vscode.commands.executeCommand(message.command);
+        });
+        this.pushState();
+    }
+
+    updateState(partial) {
+        this.state = {
+            ...this.state,
+            ...partial
+        };
+        this.pushState();
+    }
+
+    pushState() {
+        if (!this.webviewView) return;
+        this.webviewView.webview.postMessage({ type: 'state', state: this.state });
+    }
+}
+
+function getControlsViewHtml(webview) {
+    const nonce = Date.now().toString();
+    return /* html */`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https: data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+    <style>
+        :root { color-scheme: light dark; }
+        body {
+            margin: 0;
+            padding: 8px;
+            font-family: var(--vscode-font-family);
+            color: var(--vscode-foreground);
+            background: transparent;
+        }
+        .wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .toolbar {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            background: var(--vscode-editorWidget-background);
+            border: 1px solid var(--vscode-editorWidget-border);
+            border-radius: 8px;
+            padding: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+        }
+        button {
+            border: none;
+            border-radius: 5px;
+            width: 32px;
+            height: 32px;
+            background: var(--vscode-button-secondaryBackground);
+            color: var(--vscode-button-foreground);
+            font-size: 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.1s ease, background 0.1s ease, opacity 0.1s ease;
+        }
+        button.accent {
+            background: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+        }
+        button:hover:not(:disabled) {
+            background: var(--vscode-button-hoverBackground);
+            transform: translateY(-1px);
+        }
+        button:disabled {
+            opacity: 0.4;
+            cursor: default;
+        }
+        .status {
+            font-size: 12px;
+            line-height: 1.4;
+            padding: 4px 6px;
+            border-radius: 6px;
+            background: var(--vscode-editorWidget-background);
+            border: 1px solid var(--vscode-editorWidget-border);
+        }
+        .status-title {
+            font-weight: 600;
+        }
+        .status-description {
+            color: var(--vscode-descriptionForeground);
+        }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <div class="toolbar">
+            <button class="accent" data-command="devtour.startTour" title="Start / Restart (Shift+Alt+Down)">▶</button>
+            <button data-command="devtour.previousStep" title="Previous (Shift+Alt+Up)">↑</button>
+            <button data-command="devtour.nextStep" title="Next (Shift+Alt+Down)">↓</button>
+            <button data-command="devtour.refreshSteps" title="Reload steps">↺</button>
+            <button data-command="devtour.stopTour" title="Stop (Shift+Alt+Backspace)">■</button>
+        </div>
+        <div class="status">
+            <div class="status-title" id="devtour-statusLabel">DevTour idle</div>
+            <div class="status-description" id="devtour-statusDescription">Add steps to begin.</div>
+        </div>
+    </div>
+    <script nonce="${nonce}">
+        const vscode = acquireVsCodeApi();
+        const startBtn = document.querySelector('[data-command="devtour.startTour"]');
+        const prevBtn = document.querySelector('[data-command="devtour.previousStep"]');
+        const nextBtn = document.querySelector('[data-command="devtour.nextStep"]');
+        const refreshBtn = document.querySelector('[data-command="devtour.refreshSteps"]');
+        const stopBtn = document.querySelector('[data-command="devtour.stopTour"]');
+        const statusLabel = document.getElementById('devtour-statusLabel');
+        const statusDescription = document.getElementById('devtour-statusDescription');
+
+        document.querySelectorAll('button[data-command]').forEach(button => {
+            button.addEventListener('click', () => {
+                const command = button.getAttribute('data-command');
+                vscode.postMessage({ command });
+            });
+        });
+
+        window.addEventListener('message', event => {
+            const { type, state } = event.data || {};
+            if (type !== 'state' || !state) return;
+
+            const { active, index, total, hasSteps, description } = state;
+            const stepLabel = active && total > 0 ? \`Step \${index + 1} / \${total}\` : 'DevTour idle';
+            statusLabel.textContent = stepLabel;
+            statusDescription.textContent = description || (hasSteps ? 'Press play to start.' : 'Add steps to begin.');
+
+            startBtn.disabled = !hasSteps;
+            prevBtn.disabled = !(active && total > 0 && index > 0);
+            nextBtn.disabled = !(active && total > 0 && index < total - 1);
+            stopBtn.disabled = !active;
+            refreshBtn.disabled = !hasSteps;
+        });
+    </script>
+</body>
+</html>
+`;
+}
+
+function formatStepDescription(step) {
+    if (!step) return '';
+    if (step.description && step.description.trim().length > 0) {
+        return step.description.trim();
+    }
+    if (step.file) {
+        return `${path.basename(step.file)}:${step.line ?? ''}`;
+    }
+    if (typeof step.line === 'number') {
+        return `Line ${step.line}`;
+    }
+    return 'DevTour step';
+}
+
 function refreshDevTourDecorations() {
     if (!devTourDecorationType) return;
 
@@ -515,7 +720,8 @@ function provideDevTourHover(document, position) {
 }
 
 class DevTourSession {
-    constructor() {
+    constructor(controlsProvider) {
+        this.controlsProvider = controlsProvider;
         this.steps = [];
         this.index = -1;
         this.active = false;
@@ -528,24 +734,25 @@ class DevTourSession {
             this.steps = [];
             this.index = -1;
             this.active = false;
+            this.notifyControls();
             return;
         }
         this.steps = readDevTourSteps(projectPath).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
         this.index = -1;
         this.active = false;
+        this.notifyControls();
     }
 
     reloadSteps() {
         const previousActive = this.active;
         const previousIndex = this.index;
         this.loadSteps();
-        if (previousActive && previousIndex >= 0 && previousIndex < this.steps.length) {
-            this.index = previousIndex;
-        } else if (previousActive && this.steps.length > 0) {
-            this.index = Math.min(previousIndex, this.steps.length - 1);
-        } else {
-            this.active = false;
-            this.index = -1;
+        if (previousActive && this.steps.length > 0) {
+            this.active = true;
+            this.index = Math.min(Math.max(previousIndex, 0), this.steps.length - 1);
+            this.notifyControls(this.steps[this.index]);
+        } else if (previousActive && this.steps.length === 0) {
+            this.stop(false);
         }
     }
 
@@ -556,6 +763,7 @@ class DevTourSession {
         }
         this.active = true;
         this.index = 0;
+        this.notifyControls(this.steps[this.index]);
         this.moveToCurrentStep();
         vscode.window.showInformationMessage('DevTour started. Use Shift+Alt+Down/Up to navigate.');
     }
@@ -592,6 +800,22 @@ class DevTourSession {
         return true;
     }
 
+    stop(showMessage = true) {
+        if (!this.active) {
+            if (showMessage) {
+                vscode.window.showInformationMessage('DevTour is not running.');
+            }
+            return;
+        }
+
+        this.active = false;
+        this.index = -1;
+        this.notifyControls();
+        if (showMessage) {
+            vscode.window.showInformationMessage('DevTour stopped.');
+        }
+    }
+
     moveToCurrentStep() {
         if (!this.steps || this.steps.length === 0 || this.index < 0 || this.index >= this.steps.length) {
             return;
@@ -599,13 +823,21 @@ class DevTourSession {
         const step = this.steps[this.index];
         openDevTourStep(step);
 
-        const description = step.description && step.description.trim().length > 0
-            ? step.description.trim()
-            : step.file
-                ? `${path.basename(step.file)}:${step.line ?? ''}`
-                : `Line ${step.line ?? ''}`;
-
+        const description = formatStepDescription(step);
         vscode.window.showInformationMessage(`DevTour ${this.index + 1}/${this.steps.length}: ${description}`);
+        this.notifyControls(step);
+    }
+
+    notifyControls(step) {
+        if (!this.controlsProvider) return;
+        const payload = {
+            active: this.active,
+            index: this.index,
+            total: this.steps.length,
+            hasSteps: this.steps.length > 0,
+            description: step ? formatStepDescription(step) : ''
+        };
+        this.controlsProvider.updateState(payload);
     }
 }
 

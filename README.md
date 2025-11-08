@@ -7,7 +7,7 @@ DevTour is a Visual Studio Code extension that helps you document and explore a 
 - **Quick access to the configuration file**: Open the DevTour JSON with a single click to edit it manually if needed.
 - **Jump straight to the code**: Selecting a step focuses the corresponding file and line in the editor.
 - **Keyboard shortcut**: Capture the current context without reaching for the mouse.
-- **Interactive playback**: Start a tour, see each step’s description in the status bar, and move forward/backward with dedicated commands or keyboard shortcuts.
+- **Interactive playback**: Start a tour, use the DevTour Controls view in the sidebar (play, next, previous, refresh, stop), and see each step’s description while you navigate.
 - **Line decorations**: Each tracked line shows a DevTour marker in the gutter so you can spot steps directly in the editor.
 
 ## How to use
@@ -15,7 +15,7 @@ DevTour is a Visual Studio Code extension that helps you document and explore a 
 2. Place the cursor on a relevant line and run **DevTour: Add DevTour Step** (context menu or `Ctrl+D Ctrl+A`).
 3. (Optional) Provide a description; it will be saved to `.devtour/devtour.json`.
 4. Open the **DEVTOUR** panel in the Activity Bar to see the ordered list of steps. Click any item to jump to the code.
-5. Press **DevTour: Start DevTour Tour** (toolbar button or Command Palette) to enter guided mode, then use `Shift+Alt+Down` / `Shift+Alt+Up` for next/previous steps.
+5. Press **DevTour: Start DevTour Tour** (toolbar button or Command Palette) to enter guided mode. Use the **DevTour Controls** view at the top of the DevTour sidebar (or `Shift+Alt+Down` / `Shift+Alt+Up`) for next/previous steps.
 
 ## Available commands
 - `devtour.addStep` – Adds a step for the active file/line (default shortcut `Ctrl+D Ctrl+A`).
@@ -23,6 +23,7 @@ DevTour is a Visual Studio Code extension that helps you document and explore a 
 - `devtour.startTour` – Begins a guided DevTour session (toolbar button and Command Palette).
 - `devtour.nextStep` – Jumps to the next step (`Shift+Alt+Down`).
 - `devtour.previousStep` – Returns to the previous step (`Shift+Alt+Up`).
+- `devtour.stopTour` – Stops the interactive tour (`Shift+Alt+Backspace`) from the controls view or keyboard.
 - `devtour.refreshSteps` – Reloads the steps list manually.
 - `devtour.openConfig` – Opens (or creates) the `.devtour/devtour.json` file.
 

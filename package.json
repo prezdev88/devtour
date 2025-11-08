@@ -24,6 +24,11 @@
     "views": {
       "devtour": [
         {
+          "id": "devtourControlsView",
+          "name": "DevTour Controls",
+          "type": "webview"
+        },
+        {
           "id": "devtourSteps",
           "name": "DevTour Explorer"
         }
@@ -44,6 +49,11 @@
         "command": "devtour.previousStep",
         "title": "Devtour: Previous DevTour Step",
         "icon": "$(arrow-left)"
+      },
+      {
+        "command": "devtour.stopTour",
+        "title": "Devtour: Stop DevTour Tour",
+        "icon": "$(stop)"
       },
       {
         "command": "devtour.addStep",
@@ -79,25 +89,6 @@
       ],
       "view/title": [
         {
-          "command": "devtour.refreshSteps",
-          "when": "view == devtourSteps",
-          "group": "navigation"
-        },
-        {
-          "command": "devtour.openConfig",
-          "when": "view == devtourSteps",
-          "group": "navigation"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "devtour.deleteStep",
-          "when": "view == devtourSteps && viewItem == devTourStep",
-          "group": "inline@1"
-        }
-      ],
-      "view/title": [
-        {
           "command": "devtour.startTour",
           "when": "view == devtourSteps",
           "group": "navigation@-1"
@@ -121,6 +112,18 @@
           "command": "devtour.openConfig",
           "when": "view == devtourSteps",
           "group": "navigation"
+        },
+        {
+          "command": "devtour.stopTour",
+          "when": "view == devtourSteps",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "devtour.deleteStep",
+          "when": "view == devtourSteps && viewItem == devTourStep",
+          "group": "inline@1"
         }
       ]
     },
@@ -139,6 +142,11 @@
         "command": "devtour.previousStep",
         "key": "shift+alt+up",
         "when": "editorTextFocus"
+      },
+      {
+        "command": "devtour.stopTour",
+        "key": "shift+alt+backspace",
+        "when": "editorFocus"
       }
     ]
   },
