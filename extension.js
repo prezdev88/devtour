@@ -4,11 +4,14 @@ const path = require('path');
 
 let devTourTreeDataProvider;
 let devTourDecorationType;
+let devTourStepsCache = new Map();
+let devTourSession;
 
 function activate(context) {
     checkForExistingDevTourFile();
 
     devTourTreeDataProvider = new DevTourTreeDataProvider();
+    devTourSession = new DevTourSession();
 
     const lightIcon = vscode.Uri.file(path.join(context.extensionPath, 'media', 'devtour-gutter-light.svg'));
     const darkIcon = vscode.Uri.file(path.join(context.extensionPath, 'media', 'devtour-gutter-dark.svg'));
@@ -36,6 +39,7 @@ function activate(context) {
     const refreshCmd = vscode.commands.registerCommand('devtour.refreshSteps', () => {
         devTourTreeDataProvider?.refresh();
         refreshDevTourDecorations();
+        devTourSession?.reloadSteps();
     });
 
     const openConfigCmd = vscode.commands.registerCommand('devtour.openConfig', () => {
@@ -46,12 +50,34 @@ function activate(context) {
         deleteDevTourStep(item);
     });
 
+    const startTourCmd = vscode.commands.registerCommand('devtour.startTour', () => {
+        devTourSession?.start();
+    });
+
+    const nextStepCmd = vscode.commands.registerCommand('devtour.nextStep', () => {
+        devTourSession?.next();
+    });
+
+    const previousStepCmd = vscode.commands.registerCommand('devtour.previousStep', () => {
+        devTourSession?.previous();
+    });
+
+    const hoverProvider = vscode.languages.registerHoverProvider({ scheme: 'file' }, {
+        provideHover(document, position) {
+            return provideDevTourHover(document, position);
+        }
+    });
+
     context.subscriptions.push(
         addStepCmd,
         openStepCmd,
         refreshCmd,
         openConfigCmd,
         deleteStepCmd,
+        startTourCmd,
+        nextStepCmd,
+        previousStepCmd,
+        hoverProvider,
         vscode.window.registerTreeDataProvider('devtourSteps', devTourTreeDataProvider),
         vscode.window.onDidChangeActiveTextEditor(() => refreshDevTourDecorations()),
         vscode.window.onDidChangeVisibleTextEditors(() => refreshDevTourDecorations())
@@ -134,6 +160,7 @@ function saveStepToFile(projectPath, step) {
     vscode.window.showInformationMessage(`DevTour step #${order} added at line ${step.line}`);
     devTourTreeDataProvider?.refresh();
     refreshDevTourDecorations();
+    devTourSession?.reloadSteps();
 }
 
 function readDevTourSteps(projectPath) {
@@ -163,14 +190,17 @@ function registerDevTourWatcher(context) {
         watcher.onDidChange(() => {
             devTourTreeDataProvider?.refresh();
             refreshDevTourDecorations();
+            devTourSession?.reloadSteps();
         }),
         watcher.onDidCreate(() => {
             devTourTreeDataProvider?.refresh();
             refreshDevTourDecorations();
+            devTourSession?.reloadSteps();
         }),
         watcher.onDidDelete(() => {
             devTourTreeDataProvider?.refresh();
             refreshDevTourDecorations();
+            devTourSession?.reloadSteps();
         })
     );
 }
@@ -214,6 +244,7 @@ function openDevTourConfig() {
         fs.writeFileSync(devtourFile, JSON.stringify([], null, 2));
         devTourTreeDataProvider?.refresh();
         refreshDevTourDecorations();
+        devTourSession?.reloadSteps();
     }
 
     vscode.workspace.openTextDocument(devtourFile).then(
@@ -267,6 +298,7 @@ async function deleteDevTourStep(item) {
     vscode.window.showInformationMessage('DevTour step removed.');
     devTourTreeDataProvider?.refresh();
     refreshDevTourDecorations();
+    devTourSession?.reloadSteps();
 }
 
 function devTourStepsEqual(a, b) {
@@ -378,20 +410,23 @@ function refreshDevTourDecorations() {
 
     const projectPath = getWorkspaceFolderPath();
     if (!projectPath) {
+        devTourStepsCache = new Map();
         clearDecorations();
         return;
     }
 
     const steps = readDevTourSteps(projectPath);
-    const stepsByFile = steps.reduce((accumulator, step) => {
-        if (!step.file) return accumulator;
-        const key = normalizePath(step.file);
-        if (!accumulator.has(key)) {
-            accumulator.set(key, []);
+    const stepsByFile = new Map();
+    steps.forEach(step => {
+        if (!step.file) return;
+        const key = normalizePath(path.join(projectPath, step.file));
+        if (!stepsByFile.has(key)) {
+            stepsByFile.set(key, []);
         }
-        accumulator.get(key).push(step);
-        return accumulator;
-    }, new Map());
+        stepsByFile.get(key).push(step);
+    });
+
+    devTourStepsCache = stepsByFile;
 
     vscode.window.visibleTextEditors.forEach(editor => {
         applyDecorationsToEditor(editor, projectPath, stepsByFile);
@@ -413,21 +448,165 @@ function applyDecorationsToEditor(editor, projectPath, stepsByFile) {
         return;
     }
 
-    const relative = path.relative(projectPath, editor.document.uri.fsPath);
-    const key = normalizePath(relative);
+    const absolutePath = normalizePath(editor.document.uri.fsPath);
+    const key = absolutePath;
     const steps = stepsByFile.get(key) || [];
 
-    const ranges = steps.map(step => {
+    const decorations = steps.map(step => {
         const lineIndex = Math.max((step.line || 1) - 1, 0);
-        return new vscode.Range(lineIndex, 0, lineIndex, 0);
+        const range = new vscode.Range(lineIndex, 0, lineIndex, 0);
+        const hoverParts = [];
+        if (typeof step.order === 'number') {
+            hoverParts.push(`DevTour step #${step.order}`);
+        } else {
+            hoverParts.push('DevTour step');
+        }
+        if (step.description) {
+            hoverParts.push(step.description);
+        }
+        hoverParts.push(`Line: ${step.line ?? 'unknown'}`);
+        if (step.file) {
+            hoverParts.push(step.file);
+        }
+        return {
+            range,
+            hoverMessage: hoverParts.join('\n')
+        };
     });
 
-    editor.setDecorations(devTourDecorationType, ranges);
+    editor.setDecorations(devTourDecorationType, decorations);
 }
 
 function normalizePath(value) {
     if (!value) return '';
     return value.replace(/\\/g, '/');
+}
+
+function provideDevTourHover(document, position) {
+    const projectPath = getWorkspaceFolderPath();
+    if (!projectPath) return undefined;
+
+    const key = normalizePath(document.uri.fsPath);
+    const steps = devTourStepsCache.get(key);
+    if (!steps || steps.length === 0) return undefined;
+
+    const step = steps.find(item => {
+        const lineIndex = Math.max((item.line || 1) - 1, 0);
+        return lineIndex === position.line;
+    });
+
+    if (!step) return undefined;
+
+    const lines = [];
+    if (typeof step.order === 'number') {
+        lines.push(`**DevTour step #${step.order}**`);
+    } else {
+        lines.push('**DevTour step**');
+    }
+    if (step.description) {
+        lines.push(step.description);
+    }
+    lines.push(`\`Line ${step.line ?? '?'}\``);
+    if (step.file) {
+        lines.push(`\`${step.file}\``);
+    }
+
+    return new vscode.Hover(lines.join('\n\n'));
+}
+
+class DevTourSession {
+    constructor() {
+        this.steps = [];
+        this.index = -1;
+        this.active = false;
+        this.loadSteps();
+    }
+
+    loadSteps() {
+        const projectPath = getWorkspaceFolderPath();
+        if (!projectPath) {
+            this.steps = [];
+            this.index = -1;
+            this.active = false;
+            return;
+        }
+        this.steps = readDevTourSteps(projectPath).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+        this.index = -1;
+        this.active = false;
+    }
+
+    reloadSteps() {
+        const previousActive = this.active;
+        const previousIndex = this.index;
+        this.loadSteps();
+        if (previousActive && previousIndex >= 0 && previousIndex < this.steps.length) {
+            this.index = previousIndex;
+        } else if (previousActive && this.steps.length > 0) {
+            this.index = Math.min(previousIndex, this.steps.length - 1);
+        } else {
+            this.active = false;
+            this.index = -1;
+        }
+    }
+
+    start() {
+        if (!this.steps || this.steps.length === 0) {
+            vscode.window.showInformationMessage('No DevTour steps to start.');
+            return;
+        }
+        this.active = true;
+        this.index = 0;
+        this.moveToCurrentStep();
+        vscode.window.showInformationMessage('DevTour started. Use Shift+Alt+Down/Up to navigate.');
+    }
+
+    next() {
+        if (!this.ensureActive()) return;
+        if (this.index >= this.steps.length - 1) {
+            vscode.window.showInformationMessage('End of DevTour.');
+            return;
+        }
+        this.index += 1;
+        this.moveToCurrentStep();
+    }
+
+    previous() {
+        if (!this.ensureActive()) return;
+        if (this.index <= 0) {
+            vscode.window.showInformationMessage('Already at the first DevTour step.');
+            return;
+        }
+        this.index -= 1;
+        this.moveToCurrentStep();
+    }
+
+    ensureActive() {
+        if (!this.steps || this.steps.length === 0) {
+            vscode.window.showInformationMessage('No DevTour steps available.');
+            return false;
+        }
+        if (!this.active) {
+            this.start();
+            return false;
+        }
+        return true;
+    }
+
+    moveToCurrentStep() {
+        if (!this.steps || this.steps.length === 0 || this.index < 0 || this.index >= this.steps.length) {
+            return;
+        }
+        const step = this.steps[this.index];
+        openDevTourStep(step);
+
+        const description = step.description && step.description.trim().length > 0
+            ? step.description.trim()
+            : step.file
+                ? `${path.basename(step.file)}:${step.line ?? ''}`
+                : `Line ${step.line ?? ''}`;
+
+        vscode.window.showInformationMessage(`DevTour ${this.index + 1}/${this.steps.length}: ${description}`);
+    }
 }
 
 function deactivate() { }

@@ -31,6 +31,21 @@
     },
     "commands": [
       {
+        "command": "devtour.startTour",
+        "title": "Devtour: Start DevTour Tour",
+        "icon": "$(play)"
+      },
+      {
+        "command": "devtour.nextStep",
+        "title": "Devtour: Next DevTour Step",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "devtour.previousStep",
+        "title": "Devtour: Previous DevTour Step",
+        "icon": "$(arrow-left)"
+      },
+      {
         "command": "devtour.addStep",
         "title": "Devtour: Add DevTour Step"
       },
@@ -80,12 +95,49 @@
           "when": "view == devtourSteps && viewItem == devTourStep",
           "group": "inline@1"
         }
+      ],
+      "view/title": [
+        {
+          "command": "devtour.startTour",
+          "when": "view == devtourSteps",
+          "group": "navigation@-1"
+        },
+        {
+          "command": "devtour.nextStep",
+          "when": "view == devtourSteps",
+          "group": "navigation"
+        },
+        {
+          "command": "devtour.previousStep",
+          "when": "view == devtourSteps",
+          "group": "navigation"
+        },
+        {
+          "command": "devtour.refreshSteps",
+          "when": "view == devtourSteps",
+          "group": "navigation"
+        },
+        {
+          "command": "devtour.openConfig",
+          "when": "view == devtourSteps",
+          "group": "navigation"
+        }
       ]
     },
     "keybindings": [
       {
         "command": "devtour.addStep",
         "key": "ctrl+d ctrl+a",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "devtour.nextStep",
+        "key": "shift+alt+down",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "devtour.previousStep",
+        "key": "shift+alt+up",
         "when": "editorTextFocus"
       }
     ]
