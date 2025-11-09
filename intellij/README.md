@@ -1,44 +1,34 @@
-# DevTour para IntelliJ
+# DevTour for IntelliJ
 
-Plugin que replica la experiencia del panel DevTour de VS Code dentro de los IDEs JetBrains. Permite crear recorridos guiados (`.devtour/devtour.json`), agregar pasos directamente desde el editor y navegar entre ellos con atajos de teclado.
+## Overview
+This module mirrors the VS Code DevTour experience inside JetBrains IDEs: record steps in `.devtour/devtour.json`, add checkpoints from the editor, and play them back with keyboard shortcuts, a dedicated tool window, and gutter icons.
 
-## Características
-- Panel dedicado en la barra lateral con todas las DevTours y sus pasos.
-- Acciones para crear/seleccionar tours, agregar pasos, eliminarlos y actualizar la configuración.
-- Sesión de reproducción con inicio, siguiente/anterior y detención, resaltando el paso activo en el editor con un icono en el gutter.
-- Apertura rápida del archivo `.devtour/devtour.json` para ediciones manuales.
-- Sincronización automática cuando el archivo cambia en disco.
+## Features
+- Tool window listing every tour and its steps.
+- Actions to create/select tours, add/delete steps, refresh data, and open the config file.
+- Playback session (start / next / previous / stop) with highlighted lines plus gutter icons.
+- Quick access to `.devtour/devtour.json` for manual edits.
+- Automatic refresh when the JSON file changes on disk.
 
-## Requisitos
-- JDK 17.
+## Requirements
+- JDK 17 (Gradle 8.10 is bundled via the wrapper).
 
-## Cómo ejecutar el plugin
+## Run & build
 ```bash
 cd intellij
-./gradlew runIde
+./gradlew runIde          # launch IntelliJ with the plugin loaded
+./gradlew runIde -q       # same, quieter logs
+./gradlew buildPlugin     # produces build/distributions/DevTour-<version>.zip
 ```
 
-También puedes arrancar con menos ruido de logs usando:
-```bash
-cd intellij
-./gradlew runIde -q
-```
+`runIde` launches IntelliJ Community with DevTour preloaded, so you can test without installing anything globally.
 
-Para generar el paquete instalable (equivalente al VSIX):
-```bash
-cd intellij
-./gradlew buildPlugin
-# El zip queda en build/distributions/
-```
+## Quick usage
+- `DevTour: Add Step` (`Ctrl+D Ctrl+A`): adds the current line, asking which tour to use (or create).
+- `DevTour: Start/Next/Previous/Stop`: controls the active tour playback.
+- `DevTour: Create/Select Tour`: manages the available tours.
+- `DevTour: Open Config`: opens `.devtour/devtour.json`.
+- `DevTour: Delete Step`: available from the panel on a selected step.
 
-El comando `runIde` inicia una instancia de IntelliJ Community con el plugin cargado para pruebas locales.
-El wrapper incluido usa Gradle 8.10, por lo que no necesitas instalar Gradle en el sistema.
-
-## Uso rápido
-- `DevTour: Add Step` (`Ctrl+D Ctrl+A`): agrega la línea actual como paso. Permite elegir o crear DevTour.
-- `DevTour: Start/Next/Previous/Stop`: controla la reproducción del tour activo.
-- `DevTour: Create/Select Tour`: administra los recorridos disponibles.
-- `DevTour: Open Config`: abre `.devtour/devtour.json`.
-- `DevTour: Delete Step`: disponible desde el panel al seleccionar un paso.
-
-Todos los pasos se almacenan en `.devtour/devtour.json` utilizando la misma estructura que la extensión original de VS Code, por lo que puedes compartir el archivo entre ambos editores.
+## Shared tour file
+The `.devtour/devtour.json` format matches the VS Code extension, so both editors share the exact same tour data.
