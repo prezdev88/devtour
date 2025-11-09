@@ -1,0 +1,85 @@
+<idea-plugin>
+    <id>com.prezdev.devtour</id>
+    <name>DevTour</name>
+    <vendor email="hola@prez.dev" url="https://github.com/prezdev88">PrezDev</vendor>
+    <description><![CDATA[
+DevTour para JetBrains IDEs. Visualiza el flujo lógico de un proyecto marcando clases y métodos clave directamente desde el editor.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <projectService serviceImplementation="com.prezdev.devtour.state.DevTourManager"/>
+        <toolWindow factoryClass="com.prezdev.devtour.toolwindow.DevTourToolWindowFactory"
+                    id="DevTour"
+                    anchor="left"
+                    icon="/icons/devtour.svg"/>
+        <notificationGroup displayType="BALLOON" id="DevTour Notifications" logByDefault="true"/>
+    </extensions>
+
+    <actions>
+        <action id="DevTour.AddStep"
+                class="com.prezdev.devtour.actions.AddDevTourStepAction"
+                text="DevTour: Add Step"
+                description="Añade la línea actual como un paso de DevTour">
+            <keyboard-shortcut keymap="$default" first-keystroke="control D" second-keystroke="control A"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+
+        <action id="DevTour.Start"
+                class="com.prezdev.devtour.actions.StartDevTourAction"
+                text="DevTour: Start Tour"
+                description="Inicia la reproducción de la DevTour activa"/>
+
+        <action id="DevTour.Next"
+                class="com.prezdev.devtour.actions.NextDevTourStepAction"
+                text="DevTour: Next Step"
+                description="Avanza al siguiente paso de la DevTour">
+            <keyboard-shortcut keymap="$default" first-keystroke="shift alt DOWN"/>
+        </action>
+
+        <action id="DevTour.Previous"
+                class="com.prezdev.devtour.actions.PreviousDevTourStepAction"
+                text="DevTour: Previous Step"
+                description="Retrocede al paso anterior de la DevTour">
+            <keyboard-shortcut keymap="$default" first-keystroke="shift alt UP"/>
+        </action>
+
+        <action id="DevTour.Stop"
+                class="com.prezdev.devtour.actions.StopDevTourAction"
+                text="DevTour: Stop"
+                description="Detiene la reproducción de la DevTour">
+            <keyboard-shortcut keymap="$default" first-keystroke="shift alt BACK_SPACE"/>
+        </action>
+
+        <action id="DevTour.Refresh"
+                class="com.prezdev.devtour.actions.RefreshDevTourAction"
+                text="DevTour: Refresh"
+                description="Recarga la configuración de DevTour desde disco"/>
+
+        <action id="DevTour.OpenConfig"
+                class="com.prezdev.devtour.actions.OpenDevTourConfigAction"
+                text="DevTour: Open Config"
+                description="Abre el archivo de configuración .devtour/devtour.json"/>
+
+        <action id="DevTour.CreateTour"
+                class="com.prezdev.devtour.actions.CreateDevTourAction"
+                text="DevTour: Create Tour"
+                description="Crea una nueva DevTour"/>
+
+        <action id="DevTour.SelectTour"
+                class="com.prezdev.devtour.actions.SelectDevTourAction"
+                text="DevTour: Select Tour"
+                description="Selecciona la DevTour activa"/>
+
+        <action id="DevTour.DeleteStep"
+                class="com.prezdev.devtour.actions.DeleteDevTourStepAction"
+                text="DevTour: Delete Step"
+                description="Elimina el paso seleccionado de la DevTour"/>
+
+        <group id="DevTour.Tree.Popup" popup="true">
+            <reference ref="DevTour.SelectTour"/>
+            <reference ref="DevTour.DeleteStep"/>
+        </group>
+    </actions>
+</idea-plugin>
